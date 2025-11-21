@@ -1,3 +1,4 @@
+import re
 from battleship import BattleShipBoard, BoardComponent, BoardRow
 from qiskit import QuantumCircuit
 import numpy as np
@@ -57,15 +58,59 @@ class QuantumShipDetector:
     def detect_ships_in_row(self, row_index: int):
         row = self.board.get_row(row_index)
         circuit = MachZehnderCircuit(self.board, row)
-        print("Quantum Circuit:")
-        print(circuit.draw())
+        # print("Quantum Circuit:")
+        # print(circuit.draw())
         result = circuit.run(self.shots)
-        print(f"Results for row {row_index}:\n {result}")
+        # print(f"Results for row {row_index}:\n {result}")
+        return result
         
     def detect_ships_in_column(self, column_index: int):
         column = self.board.get_column(column_index)
         circuit = MachZehnderCircuit(self.board, column)
-        print("Quantum Circuit:")
-        print(circuit.draw())
+        # print("Quantum Circuit:")
+        # print(circuit.draw())
         result = circuit.run(self.shots)
-        print(f"Results for column {column_index}:\n {result}")
+        # print(f"Results for column {column_index}:\n {result}")
+        return result
+        
+        
+    def run(self, verbose: bool = False):
+        solutions = []
+        row_results = {}
+        column_results = {}
+        for i in range(self.board.size):
+            to_consider = set()
+            result = self.detect_ships_in_row(i)
+            print(result)
+            for key in result.keys():
+                new_key = key[:-1]
+                if set(new_key) != {"0"}:
+                    to_consider.add(new_key)
+            if len(to_consider) > 0:
+                row_results[i] = to_consider
+        for j in range(self.board.size):
+            to_consider = set()
+            result = self.detect_ships_in_column(j)
+            print(result)
+            for key in result.keys():
+                new_key = key[:-1]
+                if set(new_key) != {"0"}:
+                    to_consider.add(new_key)
+            if len(to_consider) > 0:
+                column_results[j] = to_consider
+            
+        for row_index, row_possibilities in row_results.items():
+            for row_possibility in row_possibilities:
+                if verbose:
+                    print(f"R{row_index} - {row_possibility}")
+                for col_index, col_possibilities in column_results.items():
+                    for col_possibility in col_possibilities:
+                        if verbose:
+                            print(f"    C{col_index} - {col_possibility}")
+                        overlap = any(a == '1' and b == '1' for a, b in zip(row_possibility, col_possibility))
+                        if overlap:
+                            if verbose:
+                                print(f"        OVERLAP DETECTED BETWEEN R{row_index} AND C{col_index}")
+                            solutions.append((row_index, col_index))
+                            
+        return solutions
