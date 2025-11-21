@@ -12,6 +12,6 @@ if __name__ == "__main__":
     print(board)
     
     detector = QuantumShipDetector(board, shots=1024)
-    result = detector.run()
-    print("Detection Results:")
-    print(result)
+    ship_positions, ev_score = detector.run()
+    print("Ship Positions:", ship_positions)
+    print("EV Score:", ev_score)

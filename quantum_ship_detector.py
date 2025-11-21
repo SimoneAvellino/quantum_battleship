@@ -1,3 +1,4 @@
+from calendar import c
 import re
 from battleship import BattleShipBoard, BoardComponent, BoardRow
 from qiskit import QuantumCircuit
@@ -34,7 +35,6 @@ class MachZehnderCircuit(QuantumCircuit):
             target = x * self.board.size + y + 1
             super().cx(0, target)
             
-# i * 4 + j + 1
             
     def _set_measurement_gates(self):
         measure_idx = 1 
@@ -72,33 +72,82 @@ class QuantumShipDetector:
         result = circuit.run(self.shots)
         # print(f"Results for column {column_index}:\n {result}")
         return result
-        
+
+    def _analyze_result(self, result: dict):
+        """
+        result: dict {bitstring: count}
+        bitstring = bombs...bombs path
+        - bombs = tutti i bit tranne l'ultimo
+        - path  = ultimo bit (0/1)
+
+        Ritorna:
+        - patterns: set di stringhe 'bombs' (possibili posizioni nave)
+        - ev_score: detection_count / explosion_count (se possibile)
+        """
+        detection_count = 0  # eventi EV (found, no explosion)
+        explosion_count = 0  # eventi con almeno una bomba=1
+        patterns = set()
+
+        for bitstring, count in result.items():
+            # ignora completamente '000...0' (nessuna info)
+            if set(bitstring) == {"0"}:
+                continue
+
+            bombs = bitstring[:-1]   # tutti i qubit "nave"
+            path = bitstring[-1]     # qubit fotone
+
+            # caso 1: almeno una bomba = 1 -> esplosione
+            if set(bombs) != {"0"}:
+                explosion_count += count
+                patterns.add(bombs)
+            # caso 2: nessuna bomba = 1 ma path = 1 -> detection EV
+            elif path == "1":
+                detection_count += count
+                # bombs è "000...0": non porta info di posizione,
+                # ma lo includiamo se vuoi tracciare tutte le configurazioni
+                patterns.add(bombs)
+            # caso 3: bombs tutti 0, path=0 -> nessuna info, ignora
+
+        ev_score = detection_count / explosion_count if explosion_count > 0 else 0.0
+        return patterns, ev_score
         
     def run(self, verbose: bool = False):
+        ev_scores = []
         solutions = []
         row_results = {}
         column_results = {}
+
+        # Analizza tutte le righe
         for i in range(self.board.size):
-            to_consider = set()
             result = self.detect_ships_in_row(i)
-            print(result)
-            for key in result.keys():
-                new_key = key[:-1]
-                if set(new_key) != {"0"}:
-                    to_consider.add(new_key)
-            if len(to_consider) > 0:
-                row_results[i] = to_consider
+            patterns, ev_score = self._analyze_result(result)
+
+            if patterns:
+                row_results[i] = patterns
+            if ev_score > 0:
+                ev_scores.append(ev_score)
+
+            if verbose:
+                print(f"Row {i} raw results:", result)
+                print(f"Row {i} patterns:", patterns)
+                print(f"Row {i} EV score:", ev_score)
+
+        # Analizza tutte le colonne
         for j in range(self.board.size):
-            to_consider = set()
             result = self.detect_ships_in_column(j)
-            print(result)
-            for key in result.keys():
-                new_key = key[:-1]
-                if set(new_key) != {"0"}:
-                    to_consider.add(new_key)
-            if len(to_consider) > 0:
-                column_results[j] = to_consider
-            
+            patterns, ev_score = self._analyze_result(result)
+
+            if patterns:
+                column_results[j] = patterns
+            if ev_score > 0:
+                ev_scores.append(ev_score)
+
+            if verbose:
+                print(f"Column {j} raw results:", result)
+                print(f"Column {j} patterns:", patterns)
+                print(f"Column {j} EV score:", ev_score)
+
+        # Incrocio righe/colonne: cerca overlap di '1' nelle stringhe bombs
         for row_index, row_possibilities in row_results.items():
             for row_possibility in row_possibilities:
                 if verbose:
@@ -107,10 +156,14 @@ class QuantumShipDetector:
                     for col_possibility in col_possibilities:
                         if verbose:
                             print(f"    C{col_index} - {col_possibility}")
-                        overlap = any(a == '1' and b == '1' for a, b in zip(row_possibility, col_possibility))
+                        overlap = any(
+                            a == '1' and b == '1'
+                            for a, b in zip(row_possibility, col_possibility)
+                        )
                         if overlap:
                             if verbose:
                                 print(f"        OVERLAP DETECTED BETWEEN R{row_index} AND C{col_index}")
                             solutions.append((row_index, col_index))
-                            
-        return solutions
+
+        mean_ev = sum(ev_scores) / len(ev_scores) if ev_scores else 0.0
+        return solutions, mean_ev
